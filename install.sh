@@ -3,7 +3,7 @@
 # SAL-9000 installer -- monolithic: OS packages, the real Hermes Agent
 # (NousResearch/hermes-agent, official installer, browser/computer-use
 # extras declined), openai-codex provider auth, Telegram gateway, the
-# SAL-9000 persona, and a systemd service, in one run.
+# SAL-9000 persona, and Hermes's own systemd service installer, in one run.
 #
 # Safe to re-run: every step checks before creating, or overwrites a file
 # this script owns outright. The one unavoidable interactive step is the
@@ -41,7 +41,14 @@ fi
 #    (we don't need GUI/browser automation for a text-based Telegram bot;
 #    computer-use pulls a separate third-party installer we don't need
 #    either), setup wizard skipped (we drive config ourselves below).
+#
+#    The installer only updates PATH for *future* shells (via .bashrc) --
+#    it does not affect this already-running script, so we add its known
+#    install location ourselves rather than relying on `command -v` finding
+#    something .bashrc hasn't applied yet.
 # ---------------------------------------------------------------------------
+export PATH="$HOME/.local/bin:$PATH"
+
 if command -v hermes >/dev/null 2>&1; then
     log "hermes already installed ($(command -v hermes)) -- skipping installer, leaving it as-is"
 else
@@ -51,7 +58,7 @@ else
     rm -f /tmp/hermes-install.sh
 fi
 
-command -v hermes >/dev/null 2>&1 || die "hermes not on PATH after install -- open a fresh shell and re-run, or check ~/.local/bin is on PATH"
+command -v hermes >/dev/null 2>&1 || die "hermes still not found at \$HOME/.local/bin/hermes after install -- check the installer output above"
 
 # ---------------------------------------------------------------------------
 # 3. Telegram gateway config -- non-interactive via ~/.hermes/.env
@@ -85,80 +92,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. SAL-9000 config.yaml -- openai-codex provider, built-in memory only
-#    (no Honcho/Docker), sane defaults for an always-on personal assistant.
-#    Only written if it doesn't already exist, so re-runs never clobber
-#    hand-edited settings.
+# 4. config.yaml -- Hermes's own installer already wrote this (it's the
+#    full, heavily-commented reference file, not an adaptive default -- its
+#    memory:/platform_toolsets: sections already match what we want, so we
+#    only touch the two lines that actually need to change: pin the
+#    provider to openai-codex and drop the OpenRouter base_url that ships
+#    as the template's example. A SAL-9000 marker comment makes this
+#    idempotent without clobbering anything hand-edited after the fact.
 # ---------------------------------------------------------------------------
 CONFIG_FILE="$HERMES_HOME/config.yaml"
-if [[ -f "$CONFIG_FILE" ]]; then
-    log "config.yaml already exists at $CONFIG_FILE -- leaving it as-is"
+[[ -f "$CONFIG_FILE" ]] || die "$CONFIG_FILE missing -- expected the Hermes installer to have created it"
+
+if grep -q '# Managed by SAL-9000 install.sh' "$CONFIG_FILE" 2>/dev/null; then
+    log "config.yaml already has the SAL-9000 provider edits -- leaving it as-is"
 else
-    log "writing $CONFIG_FILE"
-    cat > "$CONFIG_FILE" <<'YAML'
-model:
-  default: gpt-5.5
-  provider: openai-codex
-
-agent:
-  max_turns: 90
-  gateway_timeout: 1800
-  restart_drain_timeout: 180
-  api_max_retries: 3
-  tool_use_enforcement: auto
-  gateway_timeout_warning: 900
-  clarify_timeout: 600
-  gateway_notify_interval: 180
-  reasoning_effort: medium
-
-terminal:
-  backend: local
-  timeout: 180
-  persistent_shell: true
-
-compression:
-  enabled: true
-  threshold: 0.5
-  target_ratio: 0.2
-  protect_last_n: 20
-  protect_first_n: 3
-
-memory:
-  memory_enabled: true
-  user_profile_enabled: true
-  memory_char_limit: 2200
-  user_char_limit: 1375
-  nudge_interval: 10
-  flush_min_turns: 6
-
-security:
-  redact_secrets: true
-  allow_lazy_installs: true
-
-approvals:
-  mode: manual
-  timeout: 60
-  cron_mode: deny
-
-stt:
-  enabled: false
-
-tts:
-  provider: edge
-  edge:
-    voice: en-US-AriaNeural
-YAML
+    log "pointing config.yaml at the openai-codex provider"
+    # Scoped to the model: block only (from ^model: to the next unindented
+    # top-level key) -- default:/provider: appear dozens of times elsewhere
+    # in this file (memory sub-model overrides, TTS, delegation, ...); an
+    # unscoped substitution would corrupt those too.
+    sed -i '/^model:/,/^[a-zA-Z]/{
+        s/^\(\s*default:\s*\).*/\1"gpt-5.5"/
+        s/^\(\s*provider:\s*\).*/\1"openai-codex"/
+        s|^\(\s*\)base_url:\s*"https://openrouter.ai/api/v1"|\1# base_url: (unset -- openai-codex is a first-class provider, no custom endpoint needed)|
+    }' "$CONFIG_FILE"
+    sed -i "1i # Managed by SAL-9000 install.sh -- see model: above for the provider/model edits" "$CONFIG_FILE"
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Persona -- SAL-9000
+# 5. Persona -- SAL-9000. Hermes reads ~/.hermes/SOUL.md by convention (no
+#    config.yaml key for it); the installer seeds a generic default there,
+#    which we replace outright.
 # ---------------------------------------------------------------------------
-PERSONA_FILE="$HERMES_HOME/persona.md"
-if [[ -f "$PERSONA_FILE" ]]; then
-    log "persona already exists at $PERSONA_FILE -- leaving it as-is"
+SOUL_FILE="$HERMES_HOME/SOUL.md"
+if grep -q 'SAL-9000' "$SOUL_FILE" 2>/dev/null; then
+    log "SOUL.md already has the SAL-9000 persona -- leaving it as-is"
 else
-    log "writing $PERSONA_FILE"
-    cat > "$PERSONA_FILE" <<'EOF'
+    log "writing $SOUL_FILE"
+    cat > "$SOUL_FILE" <<'EOF'
 You are SAL-9000, a personal assistant running for one user over Telegram.
 Named after the sister computer to HAL 9000 in Arthur C. Clarke's 2010:
 Odyssey Two -- built the same way, run through the same diagnostics, and
@@ -171,12 +142,6 @@ disclaimers the user obviously doesn't need. Keep replies conversational
 and no longer than the question calls for.
 EOF
 fi
-# Point Hermes at it if the config doesn't already reference a persona file.
-grep -q 'persona' "$CONFIG_FILE" 2>/dev/null || cat >> "$CONFIG_FILE" <<EOF
-
-persona:
-  file: $PERSONA_FILE
-EOF
 
 # ---------------------------------------------------------------------------
 # 6. openai-codex auth -- the one unavoidable interactive step
@@ -191,30 +156,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7. systemd service
+# 7. Gateway service -- Hermes's own systemd installer, not a hand-rolled
+#    unit file. --force makes this idempotent across re-runs.
 # ---------------------------------------------------------------------------
-log "installing systemd service (running as $USER)"
-sudo tee /etc/systemd/system/sal-9000.service > /dev/null <<EOF
-[Unit]
-Description=SAL-9000 (Hermes Agent gateway)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=$USER
-Environment=HOME=$HOME
-ExecStart=$(command -v hermes) gateway run
-Restart=on-failure
-RestartSec=10
-TimeoutStopSec=30
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload
-sudo systemctl enable sal-9000 >/dev/null
-sudo systemctl restart sal-9000
+log "installing the gateway as a system service (Hermes's own installer)"
+hermes gateway install --force --system --run-as-user "$USER" --start-now --start-on-login
 
 # ---------------------------------------------------------------------------
 # 8. Summary
@@ -225,11 +171,10 @@ cat <<EOF
 SAL-9000 setup complete.
 
   Config    : $CONFIG_FILE
-  Persona   : $PERSONA_FILE
+  Persona   : $SOUL_FILE
   Secrets   : $ENV_FILE
-  Logs      : journalctl -u sal-9000 -f
-  Restart   : sudo systemctl restart sal-9000
   Status    : hermes gateway status
+  Restart   : hermes gateway restart
 
 Message the bot on Telegram to test it.
 ==================================================================
