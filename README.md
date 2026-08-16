@@ -14,9 +14,6 @@ the one that didn't go wrong. The persona (`~/.hermes/persona.md` after
 install) runs with that as its operating principle: direct, no hidden
 agenda, says plainly when it can't do something instead of stonewalling.
 
-Runs alongside [home-base](https://github.com/shrout1/home-base) on the
-same Pi.
-
 ## Setup
 
 ```sh
