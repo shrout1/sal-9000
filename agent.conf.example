@@ -1,0 +1,41 @@
+# Copy this file to agent.conf and edit. agent.conf is gitignored -- it
+# holds real API keys and tokens, don't commit it.
+
+# Bot token from @BotFather on Telegram (create a bot with /newbot, it'll
+# hand you a token like 123456789:AAexampleTokenGoesHere).
+TELEGRAM_BOT_TOKEN=""
+
+# Anthropic API key -- console.anthropic.com/settings/keys. Note this is
+# separate from a claude.ai Pro/Max subscription; API usage is billed
+# per-token on its own account. Can be left blank if you instead ran
+# `ant auth login` as the user this service runs as -- the bot then uses
+# that ambient credential automatically. setup_wizard.sh sets up either
+# path for you interactively.
+ANTHROPIC_API_KEY=""
+
+# Which Claude model answers messages. claude-opus-5 is the most capable
+# and the default below; claude-sonnet-5 or claude-haiku-4-5 cost
+# meaningfully less per token if you're running this as an always-on
+# personal bot and want to watch spend. Switching this needs no code
+# changes, just a restart.
+MODEL="claude-opus-5"
+
+# Comma-separated Telegram chat IDs allowed to talk to the bot. Leave
+# blank on first run -- the bot will log (not answer) any chat ID that
+# messages it, so you can find your own ID in the journal
+# (`journalctl -u sal-9000 -f`), add it here, and restart.
+ALLOWED_CHAT_IDS=""
+
+# How many prior turns (user+assistant pairs) to keep in context per chat
+# before older ones drop off. Kept small by default -- this bot doesn't
+# yet use prompt caching, so a large history costs more on every turn.
+MAX_HISTORY_TURNS="20"
+
+# Optional: path to a text file with a custom system prompt. Leave blank
+# to use the built-in default persona (agent/default_persona.txt).
+SYSTEM_PROMPT_FILE=""
+
+# Seconds to wait on each long-poll to Telegram's getUpdates. 30 is
+# Telegram's own recommended default; raising it further doesn't reduce
+# API calls meaningfully and holds a connection open longer.
+POLL_TIMEOUT_SECONDS="30"

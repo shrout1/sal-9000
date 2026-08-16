@@ -1,0 +1,6 @@
+agent.conf
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/

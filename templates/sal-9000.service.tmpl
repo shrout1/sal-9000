@@ -1,0 +1,18 @@
+# Managed by SAL-9000 install.sh — do not edit by hand, edit agent.conf instead.
+[Unit]
+Description=SAL-9000 Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shrout
+Group=shrout
+ExecStart=/opt/sal-9000/venv/bin/python3 /opt/sal-9000/agent/main.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
