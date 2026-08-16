@@ -1,6 +1,4 @@
-agent.conf
-__pycache__/
-*.pyc
-.venv/
-venv/
-*.egg-info/
+# Nothing secret is meant to live in this repo -- Hermes's own config,
+# .env, and auth.json live under ~/.hermes on the target machine, outside
+# this checkout entirely. This file is here in case that ever changes.
+*.log

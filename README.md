@@ -1,73 +1,79 @@
 # SAL-9000
 
-A personal AI assistant reachable over Telegram, running as a lightweight
-systemd service on a Raspberry Pi. The Pi is a thin client only: it holds
-the conversation, talks to Telegram, and calls the Claude API for the
-actual reasoning. Nothing runs locally that needs real compute -- that's
-deliberate, this was built to run alongside [home-base](https://github.com/shrout1/home-base)
-on a Pi 3B with under 1GB of RAM.
+A personal AI assistant reachable over Telegram, running on a Raspberry Pi
+as a systemd service. This is a thin wrapper around Nous Research's real
+[Hermes Agent](https://hermes-agent.nousresearch.com/) -- the agent loop,
+tool routing, memory, and Telegram gateway are all Hermes's own; this repo
+just installs it, points it at the `openai-codex` provider (so it runs on
+a ChatGPT/Codex subscription rather than a metered API key), configures
+the Telegram gateway non-interactively, and gives it a persona.
 
 Named after the sister computer to HAL 9000 in Arthur C. Clarke's *2010:
 Odyssey Two* -- built the same way, run through the same diagnostics, and
-the one that didn't go wrong. The system prompt (`agent/default_persona.txt`)
-runs with that as its operating principle: direct, no hidden agenda, says
-plainly when it can't do something instead of stonewalling. The model
-actually answering is Claude, not anything running locally.
+the one that didn't go wrong. The persona (`~/.hermes/persona.md` after
+install) runs with that as its operating principle: direct, no hidden
+agenda, says plainly when it can't do something instead of stonewalling.
+
+Runs alongside [home-base](https://github.com/shrout1/home-base) on the
+same Pi.
 
 ## Setup
 
 ```sh
 git clone https://github.com/shrout1/sal-9000
 cd sal-9000
-./setup_wizard.sh
+./install.sh
 ```
 
-The wizard walks you through everything interactively:
+One script, in order:
 
-- **Telegram bot token** -- paste one you already have, or it walks you
-  through creating one with [@BotFather](https://t.me/botfather) (there's
-  no API for bot creation; Telegram only offers it as a chat with
-  BotFather, so this is guided, not automated) and validates it against
-  the Bot API as soon as you paste it.
-- **Anthropic auth** -- log in with your Anthropic account via `ant auth
-  login` (OAuth; the wizard installs the `ant` CLI if it's missing), or
-  paste a static API key from
-  [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
-  and it's validated with a 1-token request.
-- **Model choice** -- opus/sonnet/haiku, with the per-token cost tradeoff
-  spelled out.
-- **Whitelisting yourself** -- it watches for a message you send the bot
-  and picks your chat ID out of the API response automatically, instead
-  of you digging it out of the logs.
-- Finishes by offering to run `sudo ./install.sh` for you.
+1. Installs base packages (`git`, `curl`; `node`/`npm` as a fallback --
+   Hermes installs its own managed Node if the system one's too old)
+2. Installs Hermes Agent itself, via the
+   [official installer](https://github.com/NousResearch/hermes-agent),
+   with `--skip-browser` (no Playwright/Chromium -- not needed for a
+   text-based bot) and `--skip-computer-use` (declines a separate
+   third-party GUI-automation installer it otherwise offers)
+3. Prompts for your Telegram bot token (from
+   [@BotFather](https://t.me/botfather)) and your numeric Telegram user
+   ID (from `@userinfobot`), writes them to `~/.hermes/.env`
+4. Writes `~/.hermes/config.yaml` -- `openai-codex` as the model provider,
+   built-in memory only (no Honcho/Docker/Postgres -- see below), sane
+   defaults for an always-on personal assistant
+5. Writes the SAL-9000 persona to `~/.hermes/persona.md`
+6. Runs `hermes auth add openai-codex` -- the one step that can't be
+   scripted away: a ChatGPT device-code login, approve it from your phone
+7. Installs and starts the `sal-9000` systemd service
 
-Re-running the wizard is safe -- it shows you each current value and lets
-you keep it or change it.
-
-### Manual setup
-
-If you'd rather not run the wizard: `cp agent.conf.example agent.conf`,
-fill in `TELEGRAM_BOT_TOKEN` and `ANTHROPIC_API_KEY` by hand, `sudo
-./install.sh`, then message the bot once and check `journalctl -u
-sal-9000 -f` for your chat ID to add to `ALLOWED_CHAT_IDS`.
+Safe to re-run -- every step checks before creating, and never clobbers a
+file you've since hand-edited.
 
 ## Design notes
 
-- **No listening ports.** The bot long-polls Telegram's `getUpdates` --
-  there's nothing bound to any network interface, so nothing to firewall.
-- **Whitelist-only.** Anyone who finds the bot's username can message it;
-  `ALLOWED_CHAT_IDS` is what stops a stranger from burning your API credits.
-- **Runs unprivileged**, as your normal user, not root.
-- Config lives in `/etc/sal-9000/agent.conf`, same `KEY="value"` format
-  as home-base's `homebase.conf`, kept out of git via `.gitignore`.
-- **Persistent memory**, modeled on [Nous Research's Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory):
-  two small bounded files per chat (`USER.md` for facts about you, `MEMORY.md`
-  for the bot's own notes), injected into the system prompt every reply. The
-  bot writes to them itself via a single `update_memory` tool -- see
-  `agent/memory.py` / `agent/brain.py`.
+- **`openai-codex`, not a raw API key.** Runs on your ChatGPT/Codex
+  subscription's device-code OAuth, the same auth Codex CLI itself uses --
+  no separate per-token billing. (Deliberately different from Claude Code:
+  Anthropic's own docs explicitly prohibit routing a third-party app
+  through Free/Pro/Max credentials, and the Agent SDK technically enforces
+  it. OpenAI's docs recommend an API key for automation but don't
+  prohibit this path the same way.)
+- **Built-in memory only, no Honcho.** Hermes supports a much deeper
+  memory backend (Honcho: Postgres+pgvector+Redis, semantic search,
+  background synthesis), but that's real infrastructure regardless of
+  which model answers its calls -- not something worth running on a Pi
+  for a single-user assistant. Built-in memory (bounded `MEMORY.md`/
+  `USER.md`-style files, updated by the agent's own tool calls) covers
+  the same goal -- durable notes across sessions -- with nothing extra
+  running.
+- **Whitelist-gated.** `TELEGRAM_ALLOWED_USERS` in `~/.hermes/.env` is a
+  numeric-user-ID allowlist; Hermes denies all DMs by default until it's
+  set, so a stranger finding the bot's username can't use it.
+- **`approvals.mode: manual`** in `config.yaml` -- Hermes asks before
+  running anything it judges risky, rather than acting freely. Loosen
+  this once you trust the setup, if you want less friction.
 
 ## Status
 
-One tool so far (`update_memory`). Not yet built: any tool that reaches
-outside the conversation (web, files, code execution), voice-to-text, a
-web UI.
+Base install: text chat, built-in memory, Telegram gateway, `openai-codex`
+provider. Not yet configured: cron/scheduled jobs, subagent delegation,
+skills beyond Hermes's own defaults, webhooks.
