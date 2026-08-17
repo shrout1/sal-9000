@@ -37,6 +37,31 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 1.5. IPv6 sanity check -- if there's no IPv6 default route, DNS can still
+#      hand out AAAA records (Telegram's API included) that nothing can
+#      actually reach. curl fails fast on an unreachable IPv6 address, but
+#      the asyncio/httpx stack Hermes's gateway uses can hang on one for
+#      minutes instead of falling back to IPv4. Disabling IPv6 at the kernel
+#      level takes it out of DNS resolution entirely, so everything goes
+#      straight to IPv4. Only touches it if IPv6 is already non-functional
+#      here -- a box with real IPv6 connectivity is left alone.
+# ---------------------------------------------------------------------------
+IPV6_SYSCTL=/etc/sysctl.d/99-disable-ipv6.conf
+if [[ -f "$IPV6_SYSCTL" ]]; then
+    log "IPv6 already disabled ($IPV6_SYSCTL) -- leaving it as-is"
+elif [[ -n "$(ip -6 route show default 2>/dev/null)" ]]; then
+    log "IPv6 default route present -- leaving IPv6 enabled"
+else
+    log "no IPv6 default route -- disabling IPv6 system-wide so DNS can't hand out unreachable AAAA records"
+    sudo tee "$IPV6_SYSCTL" >/dev/null <<'EOF'
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+    sudo sysctl -p "$IPV6_SYSCTL" >/dev/null
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Hermes Agent itself -- official installer, browser/computer-use skipped
 #    (we don't need GUI/browser automation for a text-based Telegram bot;
 #    computer-use pulls a separate third-party installer we don't need
