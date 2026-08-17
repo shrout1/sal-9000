@@ -62,10 +62,12 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Hermes Agent itself -- official installer, browser/computer-use skipped
-#    (we don't need GUI/browser automation for a text-based Telegram bot;
-#    computer-use pulls a separate third-party installer we don't need
-#    either), setup wizard skipped (we drive config ourselves below).
+# 2. Hermes Agent itself -- official installer, browser/computer-use skipped.
+#    Browser support is installed separately below (step 3b) -- Playwright's
+#    own bundled-Chromium download hangs reproducibly on this hardware, so
+#    we skip it here and wire up system Chromium + agent-browser instead.
+#    Computer-use pulls a separate third-party installer we don't need.
+#    Setup wizard skipped (we drive config ourselves below).
 #
 #    The installer only updates PATH for *future* shells (via .bashrc) --
 #    it does not affect this already-running script, so we add its known
@@ -115,6 +117,56 @@ else
     read -rp "Your numeric Telegram user ID (message @userinfobot to get it): " tg_uid
     set_env TELEGRAM_ALLOWED_USERS "$tg_uid"
 fi
+
+# ---------------------------------------------------------------------------
+# 3b. Browser support -- gives Hermes real web-browsing tools. Two hard-won
+#    findings baked in here, both discovered by actually running the
+#    obvious path and watching it fail:
+#
+#    1. Playwright's own bundled-Chromium download (`npx playwright install
+#       --with-deps chromium`) reproducibly hangs on this hardware after
+#       reaching 100% -- confirmed idle (zero CPU, zero disk I/O, no new
+#       network bytes) for minutes at a time across three separate
+#       downloads (chromium, ffmpeg, chromium-headless-shell), not a fluke.
+#       It's a bug in Playwright's out-of-process download IPC handshake on
+#       this platform, not a resource/network problem. So: skip it. Hermes's
+#       actual browser driver (agent-browser, below) doesn't need
+#       Playwright's private Chromium at all -- it just needs *a* Chromium
+#       binary, and apt's is reliable.
+#
+#    2. Hermes prefers the Browser Use CLI (browser-use) as its browser
+#       backend whenever it's installed -- but Browser Use's own docs say
+#       local-Chrome mode is for desktops with a visible display ("click
+#       Allow" on a permission popup); their documented answer for headless
+#       servers is their paid cloud browser product, not something to
+#       silently opt into. So: don't install browser-use here, and pin
+#       browser.backend to "off" so Hermes always uses its built-in
+#       agent-browser-driven tools instead, regardless of whether something
+#       else installs browser-use on this box later.
+# ---------------------------------------------------------------------------
+log "setting up browser support (system Chromium + agent-browser, not Playwright's bundled download)"
+export PATH="$HOME/.hermes/node/bin:$HOME/.local/bin:$PATH"
+
+if command -v chromium >/dev/null 2>&1; then
+    log "  system chromium already installed"
+else
+    sudo apt-get install -y -qq chromium
+fi
+
+if command -v agent-browser >/dev/null 2>&1; then
+    log "  agent-browser already installed"
+else
+    npm install -g --allow-scripts=agent-browser agent-browser
+fi
+
+CHROMIUM_PATH="$(command -v chromium)"
+if grep -q '^AGENT_BROWSER_EXECUTABLE_PATH=' "$ENV_FILE" 2>/dev/null; then
+    log "  AGENT_BROWSER_EXECUTABLE_PATH already set in $ENV_FILE -- leaving it as-is"
+else
+    set_env AGENT_BROWSER_EXECUTABLE_PATH "$CHROMIUM_PATH"
+fi
+
+hermes config set browser.backend off >/dev/null
 
 # ---------------------------------------------------------------------------
 # 4. config.yaml -- Hermes's own installer already wrote this (it's the
