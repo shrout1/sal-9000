@@ -2,3 +2,9 @@
 # .env, and auth.json live under ~/.hermes on the target machine, outside
 # this checkout entirely. This file is here in case that ever changes.
 *.log
+
+# Google OAuth client + minted tokens (google/authorize.py output) -- these
+# are credentials, not code. They live here locally and get copied to the
+# Pi out of band, never committed.
+google/client_secret*.json
+google/token_*.json
