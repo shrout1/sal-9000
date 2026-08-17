@@ -157,10 +157,13 @@ fi
 
 # ---------------------------------------------------------------------------
 # 7. Gateway service -- Hermes's own systemd installer, not a hand-rolled
-#    unit file. --force makes this idempotent across re-runs.
+#    unit file. --force makes this idempotent across re-runs. --system
+#    needs root itself; sudo drops PATH, so call it via the wrapper's fixed
+#    absolute path (it hardcodes its own venv/install paths internally, so
+#    running it as root resolves correctly regardless of root's own $HOME).
 # ---------------------------------------------------------------------------
-log "installing the gateway as a system service (Hermes's own installer)"
-hermes gateway install --force --system --run-as-user "$USER" --start-now --start-on-login
+log "installing the gateway as a system service (Hermes's own installer, service name: hermes-gateway)"
+sudo "$HOME/.local/bin/hermes" gateway install --force --system --run-as-user "$USER" --start-now --start-on-login
 
 # ---------------------------------------------------------------------------
 # 8. Summary
@@ -173,8 +176,9 @@ SAL-9000 setup complete.
   Config    : $CONFIG_FILE
   Persona   : $SOUL_FILE
   Secrets   : $ENV_FILE
-  Status    : hermes gateway status
-  Restart   : hermes gateway restart
+  Logs      : journalctl -u hermes-gateway -f
+  Status    : sudo hermes gateway status --system
+  Restart   : sudo hermes gateway restart --system
 
 Message the bot on Telegram to test it.
 ==================================================================
