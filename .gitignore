@@ -8,3 +8,4 @@
 # Pi out of band, never committed.
 google/client_secret*.json
 google/token_*.json
+__pycache__/

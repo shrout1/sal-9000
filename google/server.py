@@ -19,10 +19,18 @@ import pathlib
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 HERE = pathlib.Path(__file__).resolve().parent
-mcp = FastMCP("google-suite")
+mcp = MCPServer("google-suite")
+
+# The "SAL" calendar -- a dedicated calendar on SAL-9000's own account
+# (created via the Calendar API, not its account-identity "primary"
+# calendar), shared back to the personal account with writer access so
+# both sides can edit it. SAL-9000 never gets write access to the
+# personal calendar in the other direction -- that stays read-only via
+# calendar_list_personal below.
+SAL_CALENDAR_ID = "705e436a6c9220f828573d96dc2c4f9d68d93a9b31517f0aade487421435f8c8@group.calendar.google.com"
 
 _creds_cache: dict[str, Credentials] = {}
 
@@ -151,14 +159,15 @@ def calendar_list_personal(days: int = 7) -> list[dict]:
 
 @mcp.tool()
 def calendar_list_sal9000(days: int = 7) -> list[dict]:
-    """List upcoming events on SAL-9000's own calendar over the next N days
-    (default 7)."""
+    """List upcoming events on the shared "SAL" calendar over the next N
+    days (default 7). This calendar is writable by both SAL-9000 and the
+    user."""
     svc = _calendar("sal9000")
     now = datetime.datetime.now(datetime.timezone.utc)
     resp = (
         svc.events()
         .list(
-            calendarId="primary",
+            calendarId=SAL_CALENDAR_ID,
             timeMin=now.isoformat(),
             timeMax=(now + datetime.timedelta(days=days)).isoformat(),
             singleEvents=True,
@@ -179,15 +188,16 @@ def calendar_list_sal9000(days: int = 7) -> list[dict]:
 
 @mcp.tool()
 def calendar_create_event(summary: str, start_iso: str, end_iso: str, description: str = "") -> dict:
-    """Create an event on SAL-9000's own calendar (never the personal one).
-    start_iso/end_iso are RFC3339 datetimes, e.g. '2026-08-20T14:00:00-05:00'.
-    Since this calendar is shared with the user, the event becomes visible
-    to them without ever touching their primary calendar."""
+    """Create an event on the shared "SAL" calendar (never the user's
+    personal one). start_iso/end_iso are RFC3339 datetimes, e.g.
+    '2026-08-20T14:00:00-05:00'. Since this calendar is shared with the
+    user (writer access both ways), the event becomes visible -- and
+    editable by them -- without ever touching their personal calendar."""
     svc = _calendar("sal9000")
     event = (
         svc.events()
         .insert(
-            calendarId="primary",
+            calendarId=SAL_CALENDAR_ID,
             body={
                 "summary": summary,
                 "description": description,
@@ -202,10 +212,10 @@ def calendar_create_event(summary: str, start_iso: str, end_iso: str, descriptio
 
 @mcp.tool()
 def calendar_update_event(event_id: str, summary: str | None = None, start_iso: str | None = None, end_iso: str | None = None, description: str | None = None) -> dict:
-    """Update an existing event on SAL-9000's own calendar. Only pass the
+    """Update an existing event on the shared "SAL" calendar. Only pass the
     fields you want changed; omitted fields are left as-is."""
     svc = _calendar("sal9000")
-    event = svc.events().get(calendarId="primary", eventId=event_id).execute()
+    event = svc.events().get(calendarId=SAL_CALENDAR_ID, eventId=event_id).execute()
     if summary is not None:
         event["summary"] = summary
     if description is not None:
@@ -214,15 +224,15 @@ def calendar_update_event(event_id: str, summary: str | None = None, start_iso: 
         event["start"] = {"dateTime": start_iso}
     if end_iso is not None:
         event["end"] = {"dateTime": end_iso}
-    updated = svc.events().update(calendarId="primary", eventId=event_id, body=event).execute()
+    updated = svc.events().update(calendarId=SAL_CALENDAR_ID, eventId=event_id, body=event).execute()
     return {"id": updated["id"], "htmlLink": updated.get("htmlLink", "")}
 
 
 @mcp.tool()
 def calendar_delete_event(event_id: str) -> str:
-    """Delete an event from SAL-9000's own calendar by id."""
+    """Delete an event from the shared "SAL" calendar by id."""
     svc = _calendar("sal9000")
-    svc.events().delete(calendarId="primary", eventId=event_id).execute()
+    svc.events().delete(calendarId=SAL_CALENDAR_ID, eventId=event_id).execute()
     return f"deleted {event_id}"
 
 
